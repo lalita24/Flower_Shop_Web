@@ -82,7 +82,7 @@ app.get('/api/vases', async (req, res) => {
   try {
     const productTypeId = Number(req.query.product_type_id || 2);
     const [rows] = await pool.query(
-      'SELECT product_id, product_name, product_price AS price, product_type_id FROM product WHERE product_type_id = ? ORDER BY product_name',
+      'SELECT product_id, product_name, product_price AS price, product_type_id, product_img FROM product WHERE product_type_id = ? ORDER BY product_name',
       [productTypeId]
     );
     res.json(rows);
@@ -111,6 +111,17 @@ app.get('/api/flower-types', async (_req, res) => {
   } catch (err) {
     console.error('❌ Flower Types API Error:', err.message);
     res.status(500).json({ error: 'Failed to load flower types', detail: err.message });
+  }
+});
+
+// Bouquet styles
+app.get('/api/bouquet-styles', async (_req, res) => {
+  try {
+    const [rows] = await pool.query('SELECT bouquet_style_id, bouquet_style_name FROM bouquet_style ORDER BY bouquet_style_id');
+    res.json(rows);
+  } catch (err) {
+    console.error('❌ Bouquet Styles API Error:', err.message);
+    res.status(500).json({ error: 'Failed to load bouquet styles', detail: err.message });
   }
 });
 
@@ -177,15 +188,24 @@ app.post('/api/orders', async (req, res) => {
     if (payload.payment) {
       // use provided slip_image or generate a random placeholder filename
       const slipImage = payload.payment;
+      const slipType = payload.method;
+      if (slipType === 'cash') {
+        await conn.query('INSERT INTO payment (payment_method_id,order_id) VALUES (?,?)', [1, orderId]);
+      } else if (slipType === 'credit') {
+         const [insPayment] = await conn.query('INSERT INTO payment (payment_method_id,order_id) VALUES (?,?)', [3, orderId]);
+         await conn.query('INSERT INTO payment_card_evidence (payment_id, trans_ref, card_last4, card_brand, created_at) VALUES (?, ?, ?, ?, NOW())', [insPayment.insertId, "23asd", slipImage, "Visa"]);
+      } else {
+        const [insPayment] = await conn.query('INSERT INTO payment (payment_method_id,order_id) VALUES (?,?)', [2, orderId]);
+        await conn.query('INSERT INTO payment_evidence (payment_id, trans_ref, sender_name, bank, slip_time, raw_response, created_at) VALUES (?, ?, ?, ?, ?, ?, NOW())', [insPayment.insertId, slipImage.transRef, slipImage.sender.displayName, slipImage.sendingBank, slipImage.transTimestamp, JSON.stringify(slipImage)]);
+      }
       
-      await conn.query('INSERT INTO payment (order_id, trans_ref, sender_name, bank, amount, slip_time, raw_response, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, NOW())', [orderId,slipImage.transRef, slipImage.sender.displayName, slipImage.sendingBank, slipImage.amount, slipImage.transTimestamp, JSON.stringify(slipImage)]);
     }
 
     // Insert shopping_cart items and customizations
     if (Array.isArray(payload.items)) {
       for (const it of payload.items) {
         const [insCart] = await conn.query('INSERT INTO shopping_cart (order_id, product_id, qty, price_total) VALUES (?, ?, ?, ?)', [orderId, it.product_id, it.qty || 1, it.price_total || 0]);
-        await conn.query('UPDATE branch_product SET stock_qty = stock_qty - 1, is_available = CASE WHEN stock_qty - 1 <= 0 THEN 0 ELSE 1 END WHERE branch_id = ? AND product_id = ?', [branchId, it.product_id]);
+        await conn.query('UPDATE branch_container SET stock_qty = stock_qty - 1, is_available = CASE WHEN stock_qty - 1 <= 0 THEN 0 ELSE 1 END WHERE branch_id = ? AND product_id = ?', [branchId, it.product_id]);
         const shoppingCartId = insCart.insertId;
         if (it.bouquet_style_id) {
           await conn.query('INSERT INTO bouquet_customization (shopping_cart_id, bouquet_style_id) VALUES (?, ?)', [shoppingCartId, it.bouquet_style_id]);
@@ -260,9 +280,11 @@ app.post("/api/orders/search", async (req, res) => {
   SELECT 
     sc.*,
     pr.product_name,
+    pr.product_img,
     pt.product_type_name,
     GROUP_CONCAT(ft.flower_name ORDER BY ft.flower_name SEPARATOR ', ') AS flowers,
-    vco.vase_color_name
+    vco.vase_color_name,
+    bst.bouquet_style_name
 
   FROM \`shopping_cart\` sc
   JOIN product pr ON pr.product_id = sc.product_id
@@ -271,6 +293,8 @@ app.post("/api/orders/search", async (req, res) => {
   LEFT JOIN flower_type ft ON ft.flower_type_id = fd.flower_type_id
   LEFT JOIN vase_customization vc ON vc.shopping_cart_id = sc.shopping_cart_id
   LEFT JOIN vase_color vco ON vco.vase_color_id = vc.vase_color_id
+  LEFT JOIN bouquet_customization bc ON bc.shopping_cart_id = sc.shopping_cart_id
+  LEFT JOIN bouquet_style bst ON bst.bouquet_style_id = bc.bouquet_style_id
   WHERE sc.order_id = ?
   GROUP BY 
   sc.shopping_cart_id,
@@ -299,7 +323,7 @@ app.post("/check-dupslip", async (req, res) => {
     const { text } = req.body;
 
     const [rows] = await pool.query(
-      "SELECT 1 FROM payment WHERE trans_ref = ? LIMIT 1",
+      "SELECT 1 FROM payment_evidence WHERE trans_ref = ? LIMIT 1",
       [text]
     );
 
@@ -323,7 +347,7 @@ app.post("/check-stocks", async (req, res) => {
     for (const item of orders.cart) {
       //console.log(`สินค้าชิ้นที่ ${index + 1}:`, item.productId,`สาขาที่ :`, orders.selectedBranchId);
       const [rows] = await pool.query(
-        "SELECT bp.stock_qty FROM branch_product bp WHERE product_id = ? AND branch_id = ?",
+        "SELECT bp.stock_qty FROM branch_container bp WHERE product_id = ? AND branch_id = ?",
         [item.productId, orders.selectedBranchId]
       );
       if (rows[0].stock_qty <= 0) {
@@ -340,6 +364,51 @@ app.post("/check-stocks", async (req, res) => {
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: "Server error" });
+  }
+});
+
+
+// Employee login endpoint
+app.post('/api/employee/login', async (req, res) => {
+  try {
+    const { username, password } = req.body || {};
+    if (!username || !password) {
+      return res.status(400).json({ message: 'username and password are required' });
+    }
+
+    // Query the employee table in the `employee` database. Adjust qualification if your table lives in the same DB as other tables.
+    const [rows] = await pool.query(
+      'SELECT employee_id, username, password_hash, role_id, branch_id, name, surname FROM `employee` WHERE username = ? LIMIT 1',
+      [username]
+    );
+
+    if (!rows || rows.length === 0) {
+      return res.status(401).json({ message: 'Invalid credentials' });
+    }
+
+    const user = rows[0];
+
+    // Simple password check: compare provided password with stored password_hash value.
+    // If your database stores hashed passwords, replace this with the appropriate hash comparison.
+    if (user.password_hash !== password) {
+      return res.status(401).json({ message: 'Invalid credentials' });
+    }
+
+    // Respond with minimal user info (avoid returning password hash)
+    return res.json({
+      success: true,
+      employee: {
+        employee_id: user.employee_id,
+        username: user.username,
+        role_id: user.role_id,
+        branch_id: user.branch_id,
+        name: user.name,
+        surname: user.surname,
+      },
+    });
+  } catch (err) {
+    console.error('❌ Employee Login Error:', err.message);
+    return res.status(500).json({ message: 'Server error', detail: err.message });
   }
 });
 

@@ -13,15 +13,15 @@ export type Branch = {
 };
 
 export async function getRegions(): Promise<Region[]> {
-  const res = await fetch(`http://localhost:3000/api/regions`);
+  const res = await fetch(`http://127.0.0.1:3000/api/regions`);
   if (!res.ok) throw new Error("โหลดรายชื่อภาคไม่สำเร็จ");
   return res.json();
 }
 
 export async function getBranches(regionId?: number): Promise<Branch[]> {
   const url = regionId 
-    ? `http://localhost:3000/api/branches?region_id=${regionId}`
-    : `http://localhost:3000/api/branches`;
+    ? `http://127.0.0.1:3000/api/branches?region_id=${regionId}`
+    : `http://127.0.0.1:3000/api/branches`;
   const res = await fetch(url);
   if (!res.ok) throw new Error("โหลดรายชื่อสาขาไม่สำเร็จ");
   return res.json();

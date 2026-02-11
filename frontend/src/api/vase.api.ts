@@ -18,20 +18,20 @@ export type BouquetStyle = {
 };
 
 export async function getVases(productTypeId?: number): Promise<Vase[]> {
-  const url = productTypeId ? `http://localhost:3000/api/vases?product_type_id=${productTypeId}` : `http://localhost:3000/api/vases`;
+  const url = productTypeId ? `http://127.0.0.1:3000/api/vases?product_type_id=${productTypeId}` : `http://127.0.0.1:3000/api/vases`;
   const res = await fetch(url);
   if (!res.ok) throw new Error('โหลดรายการแจกันไม่สำเร็จ');
   return res.json();
 }
 
 export async function getVaseColors(): Promise<VaseColor[]> {
-  const res = await fetch(`http://localhost:3000/api/vase-colors`);
+  const res = await fetch(`http://127.0.0.1:3000/api/vase-colors`);
   if (!res.ok) throw new Error('โหลดสีแจกันไม่สำเร็จ');
   return res.json();
 }
 
 export async function getBouquetStyles(): Promise<BouquetStyle[]> {
-  const res = await fetch(`http://localhost:3000/api/bouquet-styles`);
+  const res = await fetch(`http://127.0.0.1:3000/api/bouquet-styles`);
   if (!res.ok) throw new Error('โหลดรูปแบบช่อไม่สำเร็จ');
   return res.json();
 }
